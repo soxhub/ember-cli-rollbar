@@ -1,27 +1,50 @@
 /* jshint node: true */
+/* eslint no-var: "off", object-shorthand: "off" */
 'use strict';
 
-var fs = require('fs');
+var merge = require('lodash/merge');
+var replace = require('broccoli-string-replace');
+var mergeTrees = require('broccoli-merge-trees');
 var path = require('path');
-var merge = require('lodash-node/modern/object/merge');
-var template = require('lodash-node/modern/string/template');
 
 module.exports = {
   name: 'ember-cli-rollbar',
-  contentFor: function(type, config) {
-    var environment = this.app.env;
-    config = config.rollbar || {};
-    var includeScript = config.enabled;
-    if (type === 'head' && includeScript) {
-      var rollbarConfig = merge({
+  included: function(app) {
+    var config = this.project.config(this.app.env).rollbar || {};
+    var defaultEnabled = this.app.env !== 'development' && this.app.env !== 'test';
+    var enabled = config.enabled == null ? defaultEnabled : config.enabled;
+    if (process.env.EMBER_CLI_FASTBOOT !== 'true') {
+      app.import('vendor/rollbar.js', {
+        prepend: true
+      });
+      app.import('vendor/rollbar-module.js');
+    }
+  },
+  treeForVendor: function(vt) {
+    var vendorTree = this._super.treeForVendor(vt);
+
+    if (process.env.EMBER_CLI_FASTBOOT !== 'true') {
+      var config = this.project.config(this.app.env).rollbar || {};
+      config = merge({
+        enabled: this.app.env !== 'development' && this.app.env !== 'test',
         captureUncaught: true,
         payload: {
-          environment: environment
+          environment: this.app.env
         }
       }, config);
-      var snippetPath = path.join(__dirname, 'addon', 'rollbar-snippet.html');
-      var snippetContent = fs.readFileSync(snippetPath, 'utf-8');
-      return template(snippetContent)({ rollbarConfig: JSON.stringify(rollbarConfig) });
+      var clientTree = replace(path.join(__dirname, 'client'), {
+        files: ['rollbar.js'],
+        pattern: {
+          match: /ROLLBAR_CONFIG/g,
+          replacement: JSON.stringify(config)
+        }
+      });
+
+      return mergeTrees([vendorTree, clientTree], {
+        overwrite: true
+      });
+    } else {
+      return vendorTree;
     }
   }
 };
